@@ -29,8 +29,12 @@ public class AutoTurretOpMode extends LinearOpMode {
     static final double TICKS_PER_DEG_TILT = 5.97;
     static final double PAN_MIN  = -135, PAN_MAX  = 135;   // 270° охват
     static final double TILT_MIN =  -15, TILT_MAX =  85;
-    static final boolean PAN_REVERSE  = false;  // флипнуть, если едет не туда (тестер)
-    static final boolean TILT_REVERSE = false;
+    // Каждая ось — 2 мотора (left/right) через общую шестерню. Флипнуть отдельно
+    // ту сторону, что крутит не туда (см. AxisMotor Tester).
+    static final boolean PAN_LEFT_REVERSE   = false;
+    static final boolean PAN_RIGHT_REVERSE  = false;
+    static final boolean TILT_LEFT_REVERSE  = false;
+    static final boolean TILT_RIGHT_REVERSE = false;
     static final double TILT_GRAVITY_FF = 0.08; // удержание наклона от провисания
 
     // ── Поведение ──────────────────────────────────────────────────────────────
@@ -51,10 +55,10 @@ public class AutoTurretOpMode extends LinearOpMode {
     @Override
     public void runOpMode() {
         // Старт ИЗ HOME (центр) — энкодеры обнуляются здесь.
-        pan  = new AxisMotor(hardwareMap, "panMotor",  TICKS_PER_DEG_PAN,
-                             PAN_MIN, PAN_MAX, PAN_REVERSE, true);
-        tilt = new AxisMotor(hardwareMap, "tiltMotor", TICKS_PER_DEG_TILT,
-                             TILT_MIN, TILT_MAX, TILT_REVERSE, true);
+        pan  = new AxisMotor(hardwareMap, "panMotorLeft", "panMotorRight", TICKS_PER_DEG_PAN,
+                             PAN_MIN, PAN_MAX, PAN_LEFT_REVERSE, PAN_RIGHT_REVERSE, true);
+        tilt = new AxisMotor(hardwareMap, "tiltMotorLeft", "tiltMotorRight", TICKS_PER_DEG_TILT,
+                             TILT_MIN, TILT_MAX, TILT_LEFT_REVERSE, TILT_RIGHT_REVERSE, true);
         tilt.kG = TILT_GRAVITY_FF;
 
         tracker = new LimelightColorTracker();

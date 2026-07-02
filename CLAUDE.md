@@ -39,8 +39,11 @@ TeamCode/src/main/java/org/firstinspires/ftc/teamcode/
 
 ## Hardware Configuration Names
 
-- `panMotor` — DcMotorEx + энкодер (Motor Port 0), горизонт 270°
-- `tiltMotor` — DcMotorEx + энкодер (Motor Port 1), вертикаль −15°…+85°
+Каждая ось (pan, tilt) — 2 мотора (left/right), сведённые через общую шестерню.
+Угол читается только с leader-энкодера, follower зеркалит мощность (см. `AxisMotor`).
+
+- `panMotorLeft` / `panMotorRight` — DcMotorEx (leader/follower), горизонт 270°
+- `tiltMotorLeft` / `tiltMotorRight` — DcMotorEx (leader/follower), вертикаль −15°…+85°
 - `limelight` — Limelight 3A (USB), pipeline 0 = Color
 
 ## Workflow / Conventions

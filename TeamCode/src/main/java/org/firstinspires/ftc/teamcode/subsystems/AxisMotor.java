@@ -5,22 +5,28 @@ import com.qualcomm.robotcore.hardware.DcMotorEx;
 import com.qualcomm.robotcore.hardware.HardwareMap;
 
 /**
- * Одна ось наведения (pan или tilt) на goBILDA Yellow Jacket моторе с энкодером.
+ * Одна ось наведения (pan или tilt) на паре goBILDA Yellow Jacket моторов,
+ * сведённых через общую шестерню (leader + follower — оба мотора крутят одну
+ * и ту же выходную ось, механически жёстко связаны через зубчатую передачу).
  *
  * Обобщённая версия проверенного {@code TurretMotor} из FTC-кода: угловой PIDF
  * с энкодерной обратной связью, статический friction-feedforward ({@code kF}),
  * gravity-feedforward ({@code kG}, для наклона) и soft-лимиты по углу.
+ *
+ * Угол читается только с энкодера leader — follower считается жёстко связанным
+ * через шестерню и просто зеркалит мощность leader'а (без своего PIDF/лимита).
  *
  * Управление через {@code targetAngle} + PIDF, а не прямой {@code setPower}
  * (кроме калибровочных методов). Визуальный сервоинг в OpMode: ошибка камеры —
  * это угол в градусах, поэтому {@code setTargetAngle(getCurrentAngle() + tx)}
  * доворачивает ось ровно на ошибку, а PIDF плавно держит.
  *
- * Старт всегда из механического home — там обнуляется энкодер.
+ * Старт всегда из механического home — там обнуляется энкодер (leader и follower).
  */
 public class AxisMotor {
 
-    private final DcMotorEx motor;
+    private final DcMotorEx leader;
+    private final DcMotorEx follower;
 
     // PIDF — public для тюнинга через Dashboard / тестер.
     public double kP = 0.011;
@@ -43,27 +49,35 @@ public class AxisMotor {
     private double targetAngle    = 0.0;
 
     /**
-     * @param hw             hardware map
-     * @param deviceName     имя мотора в конфигурации (напр. "panMotor")
-     * @param ticksPerDegree тиков энкодера на градус выходной оси (калибровать!)
-     * @param minAngle       нижний soft-лимит, °
-     * @param maxAngle       верхний soft-лимит, °
-     * @param reverse        true → инвертировать направление мотора
-     * @param resetEncoder   true → обнулить энкодер (старт из home)
+     * @param hw              hardware map
+     * @param leaderName      имя leader-мотора (источник угла), напр. "panMotorLeft"
+     * @param followerName    имя follower-мотора (зеркалит мощность leader'а), напр. "panMotorRight"
+     * @param ticksPerDegree  тиков энкодера leader на градус выходной оси (калибровать!)
+     * @param minAngle        нижний soft-лимит, °
+     * @param maxAngle        верхний soft-лимит, °
+     * @param leaderReverse   true → инвертировать направление leader-мотора
+     * @param followerReverse true → инвертировать направление follower-мотора
+     * @param resetEncoder    true → обнулить энкодер leader (старт из home)
      */
-    public AxisMotor(HardwareMap hw, String deviceName, double ticksPerDegree,
-                     double minAngle, double maxAngle, boolean reverse, boolean resetEncoder) {
+    public AxisMotor(HardwareMap hw, String leaderName, String followerName, double ticksPerDegree,
+                     double minAngle, double maxAngle,
+                     boolean leaderReverse, boolean followerReverse, boolean resetEncoder) {
         this.ticksPerDegree = ticksPerDegree;
         this.minAngle       = minAngle;
         this.maxAngle       = maxAngle;
 
-        motor = hw.get(DcMotorEx.class, deviceName);
-        motor.setDirection(reverse ? DcMotor.Direction.REVERSE : DcMotor.Direction.FORWARD);
+        leader = hw.get(DcMotorEx.class, leaderName);
+        leader.setDirection(leaderReverse ? DcMotor.Direction.REVERSE : DcMotor.Direction.FORWARD);
         if (resetEncoder) {
-            motor.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
+            leader.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
         }
-        motor.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
-        motor.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
+        leader.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
+        leader.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
+
+        follower = hw.get(DcMotorEx.class, followerName);
+        follower.setDirection(followerReverse ? DcMotor.Direction.REVERSE : DcMotor.Direction.FORWARD);
+        follower.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
+        follower.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
 
         lastUpdateTime = System.nanoTime();
         targetAngle    = resetEncoder ? 0.0 : getCurrentAngle();
@@ -93,7 +107,7 @@ public class AxisMotor {
 
     /** Удерживать текущий targetAngle через PIDF. Вызывать раз в loop. */
     public void maintainTarget() {
-        motor.setPower(calculatePIDF(targetAngle, getCurrentAngle()));
+        applyPower(calculatePIDF(targetAngle, getCurrentAngle()));
     }
 
     // ── Target control ───────────────────────────────────────────────────────
@@ -111,9 +125,9 @@ public class AxisMotor {
 
     // ── Reads ────────────────────────────────────────────────────────────────
 
-    public double  getCurrentAngle() { return motor.getCurrentPosition() / ticksPerDegree; }
+    public double  getCurrentAngle() { return leader.getCurrentPosition() / ticksPerDegree; }
     public double  getTargetAngle()  { return targetAngle; }
-    public double  getMotorPower()   { return motor.getPower(); }
+    public double  getMotorPower()   { return leader.getPower(); }
     public boolean atTarget()        { return Math.abs(targetAngle - getCurrentAngle()) < angleTolerance; }
     public double  getMinAngle()     { return minAngle; }
     public double  getMaxAngle()     { return maxAngle; }
@@ -130,18 +144,18 @@ public class AxisMotor {
             double power   = Math.signum(direction) * OVERRIDE_POWER;
             double current = getCurrentAngle();
             if ((power > 0 && current >= maxAngle) || (power < 0 && current <= minAngle)) {
-                motor.setPower(0);
+                applyPower(0);
             } else {
-                motor.setPower(power);
+                applyPower(power);
             }
         } else {
-            motor.setPower(0);
+            applyPower(0);
         }
     }
 
     /** Сырая мощность без лимитов и энкодера — только калибровка направления. */
     public void manualRotateRaw(double power) {
-        motor.setPower(power);
+        applyPower(power);
     }
 
     // ── Lifecycle ──────────────────────────────────────────────────────────────
@@ -149,8 +163,8 @@ public class AxisMotor {
     public void setPIDF(double p, double i, double d, double f) { kP = p; kI = i; kD = d; kF = f; }
 
     public void resetEncoder() {
-        motor.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
-        motor.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
+        leader.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
+        leader.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
         targetAngle    = 0.0;
         integral       = 0;
         lastError      = 0;
@@ -158,10 +172,16 @@ public class AxisMotor {
     }
 
     public void stop() {
-        motor.setPower(0);
+        applyPower(0);
         integral       = 0;
         lastError      = 0;
         lastUpdateTime = System.nanoTime();
+    }
+
+    /** Единая точка выдачи мощности — зеркалит на leader и follower. */
+    private void applyPower(double p) {
+        leader.setPower(p);
+        follower.setPower(p);
     }
 
     private double clampPower(double p) { return Math.max(-1.0, Math.min(1.0, p)); }
